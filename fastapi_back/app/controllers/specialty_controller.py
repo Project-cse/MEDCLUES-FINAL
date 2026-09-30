@@ -1,6 +1,16 @@
 import re
 from app.models import specialty_model, doctor_model
 
+def _format_specialty_dict(s):
+    if not s:
+        return s
+    d = dict(s)
+    d["specialtyName"] = d.get("specialty_name") or d.get("specialtyName") or "General"
+    d["helplineNumber"] = d.get("helpline_number") or d.get("helplineNumber")
+    d["availability"] = d.get("availability") or "24x7"
+    d["status"] = d.get("status") or "Active"
+    return d
+
 async def get_all_specialties():
     try:
         from app.services import cache_keys as ck
@@ -8,7 +18,7 @@ async def get_all_specialties():
 
         async def _load():
             specialties = await specialty_model.get_all_specialties()
-            return {"success": True, "data": specialties}
+            return {"success": True, "data": [_format_specialty_dict(s) for s in specialties]}
 
         return await cache.cache_aside(ck.specialty_list(), ck.TTL_SPECIALTY_LIST, _load)
     except Exception as e:
@@ -19,7 +29,7 @@ async def get_specialty_by_name(specialty_name: str):
         specialty = await specialty_model.get_specialty_by_name(specialty_name)
         if not specialty:
             return {"success": False, "message": "Specialty not found"}
-        return {"success": True, "data": specialty}
+        return {"success": True, "data": _format_specialty_dict(specialty)}
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -111,6 +121,6 @@ async def get_helpline_for_appointment(doc_id):
         if not specialty:
             return {"success": False, "message": "Helpline not available for this specialty"}
 
-        return {"success": True, "data": specialty}
+        return {"success": True, "data": _format_specialty_dict(specialty)}
     except Exception as e:
         return {"success": False, "message": str(e)}

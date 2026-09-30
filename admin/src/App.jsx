@@ -179,6 +179,7 @@ const App = () => {
               <Route path='/partner-analytics' element={<PartnerDashboard />} />
               <Route path='/pharmacy-master-catalog' element={<PharmacyMasterCatalog />} />
               <Route path='/hospital-pharmacy-counter' element={<HospitalPharmacyCounter />} />
+              <Route path='/pharmacy-counter' element={<HospitalPharmacyCounter />} />
               <Route path='/community-moderation' element={<CommunityModeration />} />
               <Route path='/doctor-dashboard' element={<DoctorDashboard />} />
               <Route path='/doctor-community' element={<DoctorCommunity />} />

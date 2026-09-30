@@ -22,10 +22,10 @@ from app.routes import (
     partner_emergency_routes, partner_admin_routes,
     dispatch_routes,
     partner_dashboard_routes,
-    partner_pharmacy_routes,
     partner_lab_routes,
     user_pharmacy_routes,
     dean_pharmacy_routes,
+    pharmacy_counter_routes,
     medicine_routes,
     health_protection_routes,
     partner_domain_stub_routes,
@@ -336,11 +336,11 @@ app.include_router(dispatch_routes.router)
 # Phase 3: Partner dashboard + public tracking
 app.include_router(partner_dashboard_routes.router)
 app.include_router(partner_dashboard_routes.public_router)
-# Enterprise pharmacy (PharmaSync) + lab partner (FHIR-lite)
-app.include_router(partner_pharmacy_routes.router)
+# Lab partner (FHIR-lite)
 app.include_router(partner_lab_routes.router)
 app.include_router(user_pharmacy_routes.router)
 app.include_router(dean_pharmacy_routes.router)
+app.include_router(pharmacy_counter_routes.router)
 # Phase 3 — remaining partner domain templates (radiology, insurance, …)
 app.include_router(partner_domain_stub_routes.admin_catalog_router)
 for _domain_router in partner_domain_stub_routes.domain_routers:

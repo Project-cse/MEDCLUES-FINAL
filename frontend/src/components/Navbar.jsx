@@ -160,6 +160,23 @@ const Navbar = () => {
               </NavLink>
             </li>
             <li>
+              <NavLink
+                to='/pharmacy'
+                className={({ isActive }) =>
+                  `nav-link group px-4 py-1.5 rounded-lg font-semibold text-sm transition-all duration-300 relative inline-flex items-center gap-1.5 ${isActive
+                    ? 'text-teal-600 bg-teal-50 active'
+                    : 'text-gray-700 hover:text-teal-600 hover:bg-gray-50'
+                  }`
+                }
+              >
+                PHARMACY
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                  Pickups
+                </span>
+                <span className='nav-link-line absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-teal-500 to-emerald-500 transform origin-left transition-transform duration-300 scale-x-0 group-hover:scale-x-100'></span>
+              </NavLink>
+            </li>
+            <li>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -456,6 +473,25 @@ const Navbar = () => {
                     }`}
                 >
                   DOCTORS
+                </NavLink>
+              </li>
+              <li>
+                <NavLink
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    navigate('/pharmacy')
+                    setTimeout(() => setShowMenu(false), 150)
+                  }}
+                  to='/pharmacy'
+                  className={({ isActive }) =>
+                    `block px-4 py-2.5 sm:py-3 rounded-lg font-bold text-sm sm:text-base transition-all duration-200 bg-white ${isActive
+                      ? 'text-teal-600 bg-teal-50'
+                      : 'text-gray-900 hover:text-teal-600 hover:bg-gray-50'
+                    }`
+                  }
+                >
+                  💊 PHARMACY
                 </NavLink>
               </li>
               <li>

@@ -89,7 +89,7 @@ const PharmacyMasterCatalog = () => {
   const categories = ['All', 'Fever & Pain', 'Diabetes', 'Blood Pressure', 'Vitamins & Supplements', 'Stomach Care', 'Antibiotics', 'Allergy & Asthma'];
 
   const getBackendUrl = () => {
-    return 'http://localhost:5001';
+    return import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
   };
 
   const fetchCatalogFromDB = async () => {

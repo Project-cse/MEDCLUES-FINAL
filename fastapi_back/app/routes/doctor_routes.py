@@ -202,6 +202,84 @@ async def doctor_publish_prescription(appointmentId: int, req: Request, doc_id: 
             body = {}
     return await consultation_controller.publish_prescription_for_doctor(doc_id, appointmentId, body)
 
+@router.get("/appointments/{appointmentId}/medicines")
+async def doctor_get_appointment_medicines(appointmentId: int, doc_id: int = Depends(auth_doctor)):
+    """Fetch medicines inventory for the hospital tied to this appointment."""
+    from app.config.db import db
+    from app.models import appointment_model, doctor_model
+
+    appt = await appointment_model.get_appointment_by_id(int(appointmentId))
+    hospital_id = appt.get("hospital_id") if appt else None
+    if not hospital_id:
+        doc = await doctor_model.get_doctor_by_id(doc_id)
+        hospital_id = doc.get("hospital_id") if doc else None
+
+    if not hospital_id:
+        row = await db.fetch_row("SELECT id FROM hospital_tieups LIMIT 1")
+        hospital_id = row["id"] if row else 1
+
+    medicines = await db.query(
+        """
+        SELECT id, name, brand, salt, category, dosage_form, strength,
+               price, mrp, stock, rack_location
+        FROM pharmacy_medicines
+        WHERE hospital_id = $1 AND is_active = true
+        ORDER BY name ASC
+        """,
+        hospital_id,
+    )
+    return {
+        "success": True,
+        "hospital_id": hospital_id,
+        "medicines": [dict(m) for m in medicines],
+    }
+
+@router.get("/medicines")
+async def doctor_get_medicines(hospitalId: Optional[int] = None, q: Optional[str] = None, doc_id: int = Depends(auth_doctor)):
+    """Fetch medicines inventory for doctor with optional search."""
+    from app.config.db import db
+    from app.models import doctor_model
+
+    h_id = hospitalId
+    if not h_id:
+        doc = await doctor_model.get_doctor_by_id(doc_id)
+        h_id = doc.get("hospital_id") if doc else None
+    if not h_id:
+        row = await db.fetch_row("SELECT id FROM hospital_tieups LIMIT 1")
+        h_id = row["id"] if row else 1
+
+    if q and q.strip():
+        search_pattern = f"%{q.strip()}%"
+        medicines = await db.query(
+            """
+            SELECT id, name, brand, salt, category, dosage_form, strength,
+                   price, mrp, stock, rack_location
+            FROM pharmacy_medicines
+            WHERE hospital_id = $1 AND is_active = true
+              AND (name ILIKE $2 OR salt ILIKE $2 OR brand ILIKE $2)
+            ORDER BY CASE WHEN name ILIKE $3 THEN 1 ELSE 2 END, name ASC
+            LIMIT 50
+            """,
+            h_id, search_pattern, f"{q.strip()}%",
+        )
+    else:
+        medicines = await db.query(
+            """
+            SELECT id, name, brand, salt, category, dosage_form, strength,
+                   price, mrp, stock, rack_location
+            FROM pharmacy_medicines
+            WHERE hospital_id = $1 AND is_active = true
+            ORDER BY name ASC
+            """,
+            h_id,
+        )
+
+    return {
+        "success": True,
+        "hospital_id": h_id,
+        "medicines": [dict(m) for m in medicines],
+    }
+
 @router.post("/appointments/{appointmentId}/end-video-call")
 async def doctor_end_video_call(appointmentId: int, req: Request, doc_id: int = Depends(auth_doctor)):
     body = {}

@@ -31,6 +31,8 @@ const Labs = lazy(() => import('./pages/Labs'))
 const MyLabs = lazy(() => import('./pages/MyLabs'))
 const BookService = lazy(() => import('./pages/BookService'))
 const VideoConsult = lazy(() => import('./pages/VideoConsult'))
+const Pharmacy = lazy(() => import('./pages/Pharmacy'))
+const PharmacyPickupPass = lazy(() => import('./pages/PharmacyPickupPass'))
 
 const Fallback = () => (
   <div className='py-20 text-center text-sm text-slate-500'>Loading…</div>
@@ -86,6 +88,8 @@ const App = () => {
             <Route path='/my-labs' element={<MyLabs />} />
             <Route path='/book-service' element={<BookService />} />
             <Route path='/video-consult' element={<VideoConsult />} />
+            <Route path='/pharmacy' element={<Pharmacy />} />
+            <Route path='/pharmacy/pickup/:orderId' element={<PharmacyPickupPass />} />
           </Routes>
         </Suspense>
       </main>

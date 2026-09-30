@@ -8,7 +8,6 @@ from pydantic import BaseModel, EmailStr, Field
 
 from app.middleware.auth import auth_dean
 from app.models import pharmacy_model, partner_model, hospital_model
-from app.services import pharmasync_provision_service as pps
 
 router = APIRouter(prefix="/api/dean/pharmacies", tags=["Dean Pharmacies"])
 
@@ -45,29 +44,6 @@ class UpdatePharmacyBody(BaseModel):
     is_active: Optional[bool] = None
 
 
-async def _resolve_pharmacy_partner(partner_id: int | None) -> dict:
-    if partner_id:
-        partner = await partner_model.get_partner_by_id(partner_id)
-        if not partner or partner.get("partner_type") != "PHARMACY":
-            raise HTTPException(status_code=400, detail="Partner must be an active PHARMACY type")
-        if partner.get("status") != "active":
-            raise HTTPException(status_code=400, detail="Partner is not active")
-        return partner
-
-    partners = await partner_model.list_active_pharmacy_partners()
-    if not partners:
-        raise HTTPException(
-            status_code=400,
-            detail="No active PharmaSync partner. Ask Super Admin to register PharmaSync under Enterprise Integrations.",
-        )
-    if len(partners) > 1:
-        raise HTTPException(
-            status_code=400,
-            detail="Multiple pharmacy partners available — partner_id is required",
-        )
-    return dict(partners[0])
-
-
 @router.get("/")
 async def list_pharmacies(dean: dict = Depends(auth_dean)):
     rows = await pharmacy_model.list_for_hospital(int(dean["hospital_id"]), active_only=False)
@@ -90,35 +66,17 @@ async def available_partners(dean: dict = Depends(auth_dean)):
 @router.post("/")
 async def create_pharmacy(body: CreatePharmacyBody, dean: dict = Depends(auth_dean)):
     hospital_id = int(dean["hospital_id"])
-    partner = await _resolve_pharmacy_partner(body.partner_id)
-    partner_id = int(partner["id"])
 
     hospital = await hospital_model.get_hospital_tieup_by_id(hospital_id)
     if not hospital:
         raise HTTPException(status_code=404, detail="Hospital not found")
 
-    hospital_name = hospital.get("name") or f"Hospital {hospital_id}"
     hospital_address = hospital.get("address")
+    partner_id = body.partner_id
+    if not partner_id:
+        partners = await partner_model.list_active_pharmacy_partners()
+        partner_id = int(partners[0]["id"]) if partners else 1
 
-    provision = await pps.provision_pharmacy(
-        partner=partner,
-        hospital_id=hospital_id,
-        hospital_name=hospital_name,
-        hospital_address=hospital_address,
-        pharmacy_name=body.name,
-        manager_name=body.manager_name,
-        email=str(body.email),
-        phone=body.phone,
-        address=body.address,
-        license_number=body.license_number,
-    )
-    if not provision.get("success"):
-        raise HTTPException(
-            status_code=502,
-            detail=provision.get("message") or "Failed to connect with PharmaSync",
-        )
-
-    connection_status = (provision.get("status") or "CONNECTED").lower()
     row = await pharmacy_model.create({
         "hospital_id": hospital_id,
         "partner_id": partner_id,
@@ -134,15 +92,14 @@ async def create_pharmacy(body: CreatePharmacyBody, dean: dict = Depends(auth_de
         "phone": body.phone,
         "address": body.address or hospital_address,
         "license_number": body.license_number,
-        "partner_pharmacy_ref": provision.get("pharmacyId"),
-        "connection_status": connection_status,
+        "partner_pharmacy_ref": f"PHARM-{hospital_id}",
+        "connection_status": "connected",
     })
 
     data = pharmacy_model.to_api(row)
-    data["provisionMode"] = provision.get("mode")
     return {
         "success": True,
-        "message": "Pharmacy connected with PharmaSync",
+        "message": "Hospital pharmacy created successfully",
         "data": data,
     }
 

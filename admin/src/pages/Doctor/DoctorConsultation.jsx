@@ -4,6 +4,7 @@ import axios from 'axios'
 import { toast } from 'react-toastify'
 import { DoctorContext } from '../../context/DoctorContext'
 import PatientReportsViewer from '../../components/PatientReportsViewer'
+import StructuredPrescriptionInput from '../../components/StructuredPrescriptionInput'
 
 const formatSlotDate = (slotDate) => {
   if (!slotDate) return '—'
@@ -48,6 +49,8 @@ const DoctorConsultation = () => {
 
   const [diagnosis, setDiagnosis] = useState('')
   const [tablets, setTablets] = useState('')
+  const [prescriptionItems, setPrescriptionItems] = useState([])
+  const [prescriptionTotal, setPrescriptionTotal] = useState(0)
   const [prescription, setPrescription] = useState('')
   const [notes, setNotes] = useState('')
   const [advice, setAdvice] = useState('')
@@ -78,6 +81,10 @@ const DoctorConsultation = () => {
         setNotes(c.notes || '')
         setAdvice(c.advice || '')
         setFollowupDate(c.followupDate ? String(c.followupDate).slice(0, 10) : '')
+        const loadedItems = c.prescriptionItems || c.items || []
+        if (Array.isArray(loadedItems) && loadedItems.length > 0) {
+          setPrescriptionItems(loadedItems)
+        }
       }
 
       await axios.post(
@@ -105,7 +112,16 @@ const DoctorConsultation = () => {
       try {
         const { data } = await axios.post(
           `${backendUrl}/api/doctor/appointments/${appointmentId}/save-consultation`,
-          { diagnosis, tablets, prescription, notes, advice, followupDate: followupDate || undefined },
+          {
+            diagnosis,
+            tablets,
+            prescription,
+            prescriptionItems,
+            items: prescriptionItems,
+            notes,
+            advice,
+            followupDate: followupDate || undefined,
+          },
           { headers: { dToken } }
         )
         if (data.success) {
@@ -118,7 +134,7 @@ const DoctorConsultation = () => {
         setSaving(false)
       }
     },
-    [dToken, backendUrl, appointmentId, diagnosis, tablets, prescription, notes, advice, followupDate]
+    [dToken, backendUrl, appointmentId, diagnosis, tablets, prescription, prescriptionItems, notes, advice, followupDate]
   )
 
   useEffect(() => {
@@ -128,11 +144,12 @@ const DoctorConsultation = () => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
-  }, [diagnosis, tablets, prescription, notes, advice, followupDate, loading, saveDraft])
+  }, [diagnosis, tablets, prescription, prescriptionItems, notes, advice, followupDate, loading, saveDraft])
 
   const handleEndConsultation = async () => {
-    if (!tablets.trim() && !prescription.trim()) {
-      toast.error('Please enter tablets or prescription before ending consultation')
+    const hasItems = prescriptionItems.some((it) => it.name && it.name.trim())
+    if (!hasItems && !tablets.trim() && !prescription.trim()) {
+      toast.error('Please enter at least one medicine before ending consultation')
       setActiveTab('present')
       return
     }
@@ -142,13 +159,15 @@ const DoctorConsultation = () => {
       diagnosis: diagnosis.trim() || undefined,
       tablets: tablets.trim() || undefined,
       prescription: prescription.trim() || undefined,
+      prescriptionItems,
+      items: prescriptionItems,
       notes: notes.trim() || undefined,
       advice: advice.trim() || undefined,
       followupDate: followupDate || undefined,
     })
     setEnding(false)
     if (ok) {
-      toast.success('Consultation completed — prescription sent to patient app')
+      toast.success('Consultation completed — prescription sent to hospital pharmacy counter!')
       navigate(-1)
     }
   }
@@ -374,21 +393,25 @@ const DoctorConsultation = () => {
               </Field>
             </div>
             <div className="mt-4 space-y-4">
-              <Field label="Tablets / medicines" required>
-                <textarea
-                  value={tablets}
-                  onChange={(e) => setTablets(e.target.value)}
-                  rows={5}
-                  placeholder={'Paracetamol 500mg — 1 tab twice daily × 5 days\nAmoxicillin 250mg — 1 cap TDS × 7 days'}
-                  className={inputCls}
+              <div>
+                <StructuredPrescriptionInput
+                  appointmentId={appointmentId}
+                  hospitalId={appointment?.hospital_id}
+                  items={prescriptionItems}
+                  onChange={(newItems, total, summaryText) => {
+                    setPrescriptionItems(newItems)
+                    setPrescriptionTotal(total)
+                    setTablets(summaryText)
+                  }}
                 />
-              </Field>
-              <Field label="Prescription / instructions">
+              </div>
+
+              <Field label="Prescription / Clinical Instructions">
                 <textarea
                   value={prescription}
                   onChange={(e) => setPrescription(e.target.value)}
                   rows={3}
-                  placeholder="Dosage details, precautions, lab tests…"
+                  placeholder="Dosage details, dietary precautions, lab tests, or counter pickup notes…"
                   className={inputCls}
                 />
               </Field>

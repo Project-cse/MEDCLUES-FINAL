@@ -491,6 +491,14 @@ async def get_consultation_for_doctor(doctor_id: int, appointment_id: int):
     tablets = ''
     if isinstance(attachments, dict):
         tablets = attachments.get('tablets') or ''
+    items = []
+    if c and c.get('id'):
+        try:
+            from app.models import prescription_item_model
+            raw_items = await prescription_item_model.list_for_consultation(int(c['id']))
+            items = [dict(r) for r in raw_items]
+        except Exception:
+            items = []
     return {
         'success': True,
         'consultation': {
@@ -499,6 +507,8 @@ async def get_consultation_for_doctor(doctor_id: int, appointment_id: int):
             'diagnosis': c.get('diagnosis') or '',
             'advice': c.get('advice') or '',
             'tablets': tablets,
+            'items': items,
+            'prescriptionItems': items,
             'followupDate': followup.isoformat() if hasattr(followup, 'isoformat') else (followup or ''),
         },
     }

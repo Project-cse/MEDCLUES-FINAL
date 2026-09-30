@@ -9,7 +9,6 @@ from app.models import (
     pharmacy_order_model,
     prescription_item_model,
 )
-from app.services import partner_webhook_service as pws
 from app.services.public_id_service import new_pharmacy_order_public_id
 from app.utils.app_logger import get_logger
 
@@ -176,8 +175,8 @@ async def place_order(user_id: int, body: dict) -> dict:
         for i in items
     ]
 
-    # Production partner (has active production API key) → live orders; else sandbox
-    is_sandbox = not await pharmacy_order_model.partner_has_production_key(int(pharmacy["partner_id"]))
+    # Native hospital order - not sandbox
+    is_sandbox = False
 
     order = await pharmacy_order_model.create_order(
         {
@@ -185,7 +184,7 @@ async def place_order(user_id: int, body: dict) -> dict:
             "patient_id": user_id,
             "hospital_id": int(consult["hospital_id"]),
             "pharmacy_id": pharmacy_id,
-            "partner_id": int(pharmacy["partner_id"]),
+            "partner_id": int(pharmacy.get("partner_id") or 0),
             "consultation_id": consultation_id,
             "fulfillment": fulfillment,
             "delivery_address": body.get("deliveryAddress") or body.get("delivery_address"),
@@ -196,27 +195,8 @@ async def place_order(user_id: int, body: dict) -> dict:
         order_items,
     )
 
-    # Webhook → PharmaSync
-    try:
-        await pws.emit_pharmacy_event(
-            int(pharmacy["partner_id"]),
-            "order.placed",
-            {
-                "order_id": order["id"],
-                "order_public_id": order["public_id"],
-                "consultation_id": consultation_id,
-                "hospital_id": int(consult["hospital_id"]),
-                "pharmacy_id": pharmacy_id,
-                "fulfillment": fulfillment,
-                "items": [
-                    {"name": i["name"], "dosage": i.get("dosage"), "quantity": i.get("quantity")}
-                    for i in order_items
-                ],
-            },
-            webhook_url=pharmacy.get("webhook_url"),
-        )
-    except Exception as exc:
-        log.warning("order.placed webhook failed: %s", exc)
+    await _emit_order_realtime(order)
+    await _notify_patient_status(order)
 
     full_items = await pharmacy_order_model.list_items(order["id"])
     enriched = {**order, "pharmacy_name": pharmacy.get("name"), "partner_name": pharmacy.get("partner_name")}
@@ -594,28 +574,8 @@ async def refill_order(user_id: int, order_id: int) -> dict:
         order_items,
     )
 
-    try:
-        await pws.emit_pharmacy_event(
-            int(source["partner_id"]),
-            "order.placed",
-            {
-                "order_id": order["id"],
-                "order_public_id": order["public_id"],
-                "consultation_id": source.get("consultation_id"),
-                "hospital_id": int(source["hospital_id"]),
-                "pharmacy_id": int(source["pharmacy_id"]),
-                "fulfillment": order.get("fulfillment"),
-                "refill": True,
-                "parent_order_id": order_id,
-                "items": [
-                    {"name": i["name"], "dosage": i.get("dosage"), "quantity": i.get("quantity")}
-                    for i in order_items
-                ],
-            },
-            webhook_url=pharmacy.get("webhook_url"),
-        )
-    except Exception as exc:
-        log.warning("refill order.placed webhook failed: %s", exc)
+    await _emit_order_realtime(order)
+    await _notify_patient_status(order)
 
     full_items = await pharmacy_order_model.list_items(order["id"])
     enriched = {
@@ -734,21 +694,7 @@ async def verify_pharmacy_payment(
     except ValueError as e:
         return {"success": False, "message": str(e)}
 
-    try:
-        await pws.emit_pharmacy_event(
-            int(order["partner_id"]),
-            "payment.completed",
-            {
-                "order_id": order_id,
-                "order_public_id": order.get("public_id"),
-                "amount_total": float(order["amount_total"]) if order.get("amount_total") is not None else None,
-                "currency": order.get("currency") or "INR",
-                "razorpay_payment_id": razorpay_payment_id,
-                "razorpay_order_id": razorpay_order_id,
-            },
-        )
-    except Exception as exc:
-        log.warning("payment.completed webhook failed: %s", exc)
+
 
     await _emit_order_realtime(updated)
     await _notify_patient_status(updated)
@@ -823,114 +769,20 @@ async def admin_list_pharmacy_orders(partner_id: int, limit: int = 50) -> dict:
     return {"success": True, "data": data}
 
 
-async def sync_prescription_to_express(consultation_id: int, hospital_id: int | None) -> None:
-    """Sync published prescription to Express Pharmacy backend (Port 5001)."""
-    import os
-    import httpx
-    from app.config.db import db
-
-    pharmacy_url = os.getenv("PHARMACY_SERVICE_URL", "http://localhost:5001")
-    internal_key = os.getenv("INTERNAL_API_KEY") or os.getenv("PHARMACY_INTERNAL_API_KEY", "")
-
-    try:
-        row = await db.fetch_row(
-            """
-            SELECT c.*, a.doctor_data AS doc_data, u.name AS patient_name, u.phone AS patient_phone, u.email AS patient_email
-            FROM consultations c
-            JOIN appointments a ON a.id = c.appointment_id
-            LEFT JOIN users u ON u.id = a.user_id
-            WHERE c.id = $1
-            """,
-            consultation_id,
-        )
-        if not row:
-            return
-
-        row = dict(row)
-        items = await prescription_item_model.list_for_consultation(consultation_id)
-        doc_data = row.get("doc_data") or {}
-
-        payload = {
-            "externalPrescriptionId": f"RX-{consultation_id}",
-            "doctorName": doc_data.get("name") or "Hospital Doctor",
-            "doctorSpecialty": doc_data.get("specialty") or "General Medicine",
-            "patient": {
-                "name": row.get("patient_name") or "Patient",
-                "phone": row.get("patient_phone") or "0000000000",
-                "email": row.get("patient_email") or "",
-                "age": 30,
-                "gender": "Other",
-            },
-            "medicines": [
-                {
-                    "name": i.get("name"),
-                    "dosage": i.get("dosage") or "1 tablet daily",
-                    "quantity": int(i.get("quantity") or 1),
-                    "instructions": i.get("instructions") or "",
-                }
-                for i in items
-            ] if items else [
-                {
-                    "name": "Prescribed Medicines",
-                    "dosage": "As directed",
-                    "quantity": 1,
-                    "instructions": row.get("prescription") or "",
-                }
-            ],
-            "priority": "normal",
-            "fulfillmentType": "pickup",
-        }
-
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            await client.post(
-                f"{pharmacy_url}/api/integration/medclues/prescription",
-                json=payload,
-                headers={
-                    "x-internal-api-key": internal_key,
-                    "Content-Type": "application/json",
-                },
-            )
-    except Exception as exc:
-        log.warning("Prescription sync to Express Pharmacy failed: %s", exc)
-
-
 async def on_prescription_published(
     consultation_id: int,
     hospital_id: int | None,
     appointment_id: int | None = None,
     updated: bool = False,
 ) -> None:
-    """Enqueue prescription.created / .updated to mapped pharmacy partners."""
-    asyncio.create_task(sync_prescription_to_express(consultation_id, hospital_id))
-
+    """Notify in-house hospital pharmacy counter in realtime and generate counter order with token."""
     if not hospital_id:
         return
-    pharmacies = await pharmacy_model.list_for_hospital(int(hospital_id))
-    if not pharmacies:
-        return
-    items = await prescription_item_model.list_for_consultation(consultation_id)
-    event = "prescription.updated" if updated else "prescription.created"
-    seen_partners: set[int] = set()
-    for ph in pharmacies:
-        pid = int(ph["partner_id"])
-        if pid in seen_partners:
-            continue
-        seen_partners.add(pid)
-        try:
-            await pws.emit_pharmacy_event(
-                pid,
-                event,
-                {
-                    "consultation_id": consultation_id,
-                    "appointment_id": appointment_id,
-                    "hospital_id": hospital_id,
-                    "pharmacy_id": ph["id"],
-                    "items": [_serialize_item(dict(i)) for i in items],
-                },
-                webhook_url=ph.get("webhook_url") if "webhook_url" in ph else None,
-            )
-        except Exception as exc:
-            log.warning("%s webhook failed partner=%s: %s", event, pid, exc)
+    try:
+        from app.services import hospital_pharmacy_service as hps
+        await hps.auto_create_counter_order(consultation_id, hospital_id, appointment_id)
+    except Exception as exc:
+        log.warning("Auto-create counter order failed: %s", exc)
 
 
 async def _emit_order_realtime(order: dict | None) -> None:
@@ -981,24 +833,42 @@ async def _notify_patient_status(order: dict | None) -> None:
 
 
 async def search_medicine_catalog(query: str) -> dict[str, Any]:
-    """Forward medicine search queries to Express Pharmacy backend (Port 5001)."""
-    import os
-    import httpx
+    """Search medicine catalog directly from database."""
+    from app.config.db import db
+    q = (query or "").strip()
+    if not q:
+        sql = """
+            SELECT id, name, brand, salt, category, mrp, price, requires_rx, stock, image
+            FROM pharmacy_medicines
+            ORDER BY name ASC
+            LIMIT 50
+        """
+        rows = await db.query(sql)
+    else:
+        sql = """
+            SELECT id, name, brand, salt, category, mrp, price, requires_rx, stock, image
+            FROM pharmacy_medicines
+            WHERE name ILIKE $1 OR salt ILIKE $1 OR brand ILIKE $1 OR category ILIKE $1
+            ORDER BY name ASC
+            LIMIT 50
+        """
+        rows = await db.query(sql, f"%{q}%")
 
-    pharmacy_url = os.getenv("PHARMACY_SERVICE_URL", "http://localhost:5001")
-    internal_key = os.getenv("INTERNAL_API_KEY") or os.getenv("PHARMACY_INTERNAL_API_KEY", "")
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{pharmacy_url}/api/integration/catalog/search",
-                params={"query": query},
-                headers={"x-internal-api-key": internal_key},
-            )
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception as exc:
-        log.warning("Pharmacy catalog search HTTP failed: %s", exc)
-
-    return {"success": True, "data": [], "query": query}
+    data = [
+        {
+            "id": r["id"],
+            "_id": str(r["id"]),
+            "name": r["name"],
+            "brand": r.get("brand") or "Generic",
+            "salt": r.get("salt") or "",
+            "category": r.get("category") or "General",
+            "mrp": float(r["mrp"]) if r.get("mrp") is not None else 50.0,
+            "price": float(r["price"]) if r.get("price") is not None else 40.0,
+            "requiresRx": bool(r.get("requires_rx", False)),
+            "stock": int(r.get("stock") or 0),
+            "image": r.get("image") or "",
+        }
+        for r in rows
+    ]
+    return {"success": True, "data": data, "query": q}
 

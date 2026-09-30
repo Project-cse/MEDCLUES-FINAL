@@ -59,31 +59,18 @@ class PharmacyService {
   }
 
   Future<List<Map<String, dynamic>>> searchMedicines([String query = '']) async {
-    // 1. Primary API backend
     try {
-      final res = await _api.get('/api/inventory', queryParameters: query.isNotEmpty ? {'query': query} : null);
-      final list = _parseMedicineList(res.data);
-      if (list.isNotEmpty) return list;
-    } catch (_) {}
-
-    // 2. Connected Medclues Pharmacy Backend on Render (Medclues-Pharmacy-main)
-    try {
-      final dio = Dio();
-      final res = await dio.get(
-        'https://medclues-pharmacy-backend.onrender.com/api/inventory',
+      final res = await _api.get(
+        '/api/user/pharmacy/search',
         queryParameters: query.isNotEmpty ? {'query': query} : null,
       );
+      if (res.data is Map && res.data['data'] is List) {
+        return (res.data['data'] as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+      }
       final list = _parseMedicineList(res.data);
       if (list.isNotEmpty) return list;
-    } catch (_) {}
-
-    // 3. Integration Catalog endpoint
-    try {
-      final res = await _api.get('/api/integration/catalog/search', queryParameters: {'query': query});
-      if (res.data is Map && res.data['data'] is List) {
-        final list = (res.data['data'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
-        if (list.isNotEmpty) return list;
-      }
     } catch (_) {}
 
     return [];

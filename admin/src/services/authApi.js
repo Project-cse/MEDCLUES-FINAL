@@ -8,6 +8,7 @@ export const ACCESS_KEYS = {
   doctor: 'dToken',
   dean: 'deanToken',
   receptionist: 'recToken',
+  pharmacist: 'pharmacyToken',
 }
 
 /** Legacy keys — cleared on logout for users who logged in before cookie auth. */

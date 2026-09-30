@@ -82,6 +82,24 @@ const ROLES = [
       </svg>
     ),
   },
+  {
+    id: 'pharmacist',
+    label: 'Pharmacist',
+    short: 'Pharmacy',
+    accent: '#10b981',
+    accentSoft: 'bg-emerald-50 border-emerald-300 text-emerald-700',
+    btn: 'bg-emerald-600 hover:bg-emerald-700',
+    endpoint: '/api/pharmacy/auth/login',
+    dashboard: '/hospital-pharmacy-counter',
+    tokenKey: 'pharmacist',
+    placeholder: 'Enter your pharmacist email',
+    showForgot: false,
+    icon: (
+      <svg className='w-5 h-5' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+        <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' />
+      </svg>
+    ),
+  },
 ]
 
 const FEATURES = [
@@ -151,6 +169,11 @@ const Login = () => {
         saveAuthTokens('receptionist', data.token)
         sessionStorage.setItem('recInfo', JSON.stringify(data.reception))
         toast.success('Reception login successful!')
+      } else if (role.tokenKey === 'pharmacist') {
+        saveAuthTokens('pharmacist', data.token)
+        sessionStorage.setItem('pharmacyToken', data.token)
+        sessionStorage.setItem('pharmacyStaff', JSON.stringify(data.staff || {}))
+        toast.success(`Pharmacist login successful! Welcome ${data.staff?.name || ''}`)
       } else {
         setDToken(data.token)
         saveAuthTokens('doctor', data.token)

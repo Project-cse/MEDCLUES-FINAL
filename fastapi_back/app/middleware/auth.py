@@ -284,3 +284,43 @@ async def auth_assistant(request: Request, token: fastapi.security.HTTPAuthoriza
         raise
     except JWTError:
         raise HTTPException(status_code=401, detail="Not authorized, login again")
+
+
+async def auth_pharmacist(request: Request, token: fastapi.security.HTTPAuthorizationCredentials = Depends(security)):
+    """Extract and validate a PHARMACIST or DEAN JWT. Returns dict with id & hospital_id."""
+    token_str = token.credentials if token else None
+    if not token_str:
+        for header_key in ["pharmacytoken", "pharmacy-token", "pharmacyToken", "token", "deantoken", "dean-token"]:
+            token_str = request.headers.get(header_key)
+            if token_str:
+                break
+    if not token_str:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and not auth_header.startswith("Bearer "):
+            token_str = auth_header
+    if not token_str:
+        raise HTTPException(status_code=401, detail="No pharmacist token provided")
+    await _reject_if_blacklisted(token_str)
+    try:
+        secret = settings.JWT_SECRET.strip('"').strip("'")
+        payload = jwt.decode(token_str, secret, algorithms=["HS256"])
+        verify_access_payload(payload)
+        role = (payload.get("role") or "").strip().lower()
+        if role not in ("pharmacist", "dean", "admin"):
+            raise HTTPException(status_code=403, detail="Access denied: pharmacist role required")
+        staff_id = payload.get("id")
+        hospital_id = payload.get("hospital_id")
+        if hospital_id is None and role != "admin":
+            raise HTTPException(status_code=401, detail="Invalid token: missing hospital_id")
+        return {
+            "id": staff_id,
+            "hospital_id": int(hospital_id) if hospital_id else None,
+            "role": role,
+            "email": payload.get("email"),
+            "name": payload.get("name") or "Pharmacist",
+        }
+    except HTTPException:
+        raise
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Not authorized, login again")
+

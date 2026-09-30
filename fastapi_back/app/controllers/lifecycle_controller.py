@@ -115,6 +115,34 @@ async def save_consultation_draft(
         json.dumps(attachments),
     )
 
+    # Save structured prescription items if provided
+    items = body.get("items") or body.get("prescriptionItems")
+    if items and isinstance(items, list):
+        try:
+            from app.models import prescription_item_model
+            from app.services import pharmacy_service
+            import asyncio
+            normalized = []
+            for t in items:
+                if isinstance(t, str) and t.strip():
+                    normalized.append({"name": t.strip()})
+                elif isinstance(t, dict) and (t.get("name") or t.get("medicine")):
+                    normalized.append(t)
+            if normalized:
+                await prescription_item_model.replace_for_consultation(
+                    int(consultation["id"]), normalized
+                )
+                asyncio.create_task(
+                    pharmacy_service.on_prescription_published(
+                        int(consultation["id"]),
+                        appointment.get("hospital_id"),
+                        appointment_id=int(appointment_id),
+                        updated=True,
+                    )
+                )
+        except Exception as pi_err:
+            log.warning("Structured prescription items save failed in draft: %s", pi_err)
+
     return {
         "success": True,
         "message": "Prescription saved for patient",
@@ -573,6 +601,35 @@ async def complete_consultation(
             followup,
             json.dumps(attachments),
         )
+
+        # Structured prescription line items and hospital counter order trigger
+        try:
+            from app.models import prescription_item_model
+            from app.services import pharmacy_service
+            import asyncio
+            items = body.get("items") or body.get("prescriptionItems")
+            if items and isinstance(items, list):
+                normalized = []
+                for t in items:
+                    if isinstance(t, str) and t.strip():
+                        normalized.append({"name": t.strip()})
+                    elif isinstance(t, dict) and (t.get("name") or t.get("medicine")):
+                        normalized.append(t)
+                if normalized:
+                    await prescription_item_model.replace_for_consultation(
+                        int(consultation["id"]), normalized
+                    )
+
+            asyncio.create_task(
+                pharmacy_service.on_prescription_published(
+                    int(consultation["id"]),
+                    appointment.get("hospital_id"),
+                    appointment_id=int(appointment_id),
+                    updated=False,
+                )
+            )
+        except Exception as rx_pub_err:
+            log.warning("Structured prescription complete trigger skipped: %s", rx_pub_err)
 
     try:
         await appointment_lifecycle_service.transition(
